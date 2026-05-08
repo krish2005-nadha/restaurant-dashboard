@@ -1,8 +1,9 @@
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 import pandas as pd
 import os
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 
 app = FastAPI(
@@ -17,6 +18,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 DATA_PATH = os.path.join("data", "sample_orders.csv")
 
 def load_data():
@@ -26,6 +28,19 @@ def load_data():
     df["month"]   = df["order_datetime"].dt.month
     df["weekday"] = df["order_datetime"].dt.day_name()
     return df
+
+def save_data(df):
+    df.drop(columns=["date", "hour", "month", "weekday"],
+            errors="ignore").to_csv(DATA_PATH, index=False)
+
+class OrderCreate(BaseModel):
+    customer_id:    str
+    item_name:      str
+    category:       str
+    quantity:       int
+    unit_price:     float
+    payment_method: str
+    order_type:     str
 
 @app.get("/")
 def root():
@@ -42,6 +57,7 @@ def health():
             "end":   str(df["date"].max()),
         }
     }
+
 @app.get("/kpi")
 def get_kpis(
     start_date: Optional[date] = Query(None),
@@ -72,6 +88,7 @@ def get_kpis(
         "repeat_customers":    repeat_customers,
         "repeat_customer_pct": repeat_rate,
     }
+
 @app.get("/bestsellers")
 def get_bestsellers(
     start_date: Optional[date] = Query(None),
@@ -94,6 +111,7 @@ def get_bestsellers(
     grouped = grouped.sort_values("total_revenue", ascending=False).head(top_n)
     
     return {"items": grouped.to_dict(orient="records")}
+
 @app.get("/peak-hours")
 def get_peak_hours(
     start_date: Optional[date] = Query(None),
@@ -116,6 +134,7 @@ def get_peak_hours(
     hourly["orders"] = hourly["orders"].astype(int)
     
     return {"hourly": hourly.to_dict(orient="records")}
+
 @app.get("/repeat-customers")
 def get_repeat_customers(
     start_date: Optional[date] = Query(None),
@@ -139,6 +158,7 @@ def get_repeat_customers(
     cust["last_visit"] = cust["last_visit"].astype(str)
     
     return {"customers": cust.to_dict(orient="records")}
+
 @app.get("/monthly-trend")
 def get_monthly_trend(
     start_date: Optional[date] = Query(None),
@@ -157,6 +177,7 @@ def get_monthly_trend(
     ).reset_index().sort_values("month")
     
     return {"monthly": monthly.to_dict(orient="records")}
+
 @app.get("/category-breakdown")
 def get_category_breakdown(
     start_date: Optional[date] = Query(None),
@@ -179,3 +200,102 @@ def get_category_breakdown(
     cat = cat.sort_values("revenue", ascending=False)
     
     return {"categories": cat.to_dict(orient="records")}
+
+@app.get("/orders")
+def get_orders(
+    start_date: Optional[date] = Query(None),
+    end_date:   Optional[date] = Query(None),
+):
+    df = load_data()
+    
+    if start_date:
+        df = df[df["date"] >= start_date]
+    if end_date:
+        df = df[df["date"] <= end_date]
+    
+    df_sorted = df.sort_values("order_datetime", ascending=False).head(50)
+    
+    return {
+        "total_rows": len(df),
+        "orders": df_sorted[[
+            "order_id", "order_datetime", "customer_id",
+            "item_name", "category", "quantity",
+            "unit_price", "total_price", "payment_method", "order_type",
+        ]].to_dict(orient="records"),
+    }
+
+# ── CRUD Operations ───────────────────────────────────────────────────────────
+
+@app.post("/orders/create")
+def create_order(order: OrderCreate):
+    df = load_data()
+    
+    new_order_id = int(df["order_id"].max()) + 1
+    new_row = {
+        "order_id":       new_order_id,
+        "order_datetime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "customer_id":    order.customer_id,
+        "item_name":      order.item_name,
+        "category":       order.category,
+        "quantity":       order.quantity,
+        "unit_price":     order.unit_price,
+        "total_price":    order.unit_price * order.quantity,
+        "payment_method": order.payment_method,
+        "order_type":     order.order_type,
+    }
+    
+    new_df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+    save_data(new_df)
+    
+    return {
+        "message": "Order created successfully",
+        "order_id": new_order_id,
+        "total_price": new_row["total_price"],
+    }
+
+@app.get("/orders/{order_id}")
+def get_single_order(order_id: int):
+    df = load_data()
+    
+    order = df[df["order_id"] == order_id]
+    
+    if order.empty:
+        raise HTTPException(status_code=404, detail=f"Order {order_id} not found")
+    
+    return {"order": order[[
+        "order_id", "order_datetime", "customer_id",
+        "item_name", "category", "quantity",
+        "unit_price", "total_price", "payment_method", "order_type",
+    ]].to_dict(orient="records")}
+
+@app.put("/orders/{order_id}")
+def update_order(order_id: int, order: OrderCreate):
+    df = load_data()
+    
+    if not (df["order_id"] == order_id).any():
+        raise HTTPException(status_code=404, detail=f"Order {order_id} not found")
+    
+    df.loc[df["order_id"] == order_id, "customer_id"]    = order.customer_id
+    df.loc[df["order_id"] == order_id, "item_name"]      = order.item_name
+    df.loc[df["order_id"] == order_id, "category"]       = order.category
+    df.loc[df["order_id"] == order_id, "quantity"]        = order.quantity
+    df.loc[df["order_id"] == order_id, "unit_price"]     = order.unit_price
+    df.loc[df["order_id"] == order_id, "total_price"]    = order.unit_price * order.quantity
+    df.loc[df["order_id"] == order_id, "payment_method"] = order.payment_method
+    df.loc[df["order_id"] == order_id, "order_type"]     = order.order_type
+    
+    save_data(df)
+    
+    return {"message": f"Order {order_id} updated successfully"}
+
+@app.delete("/orders/{order_id}")
+def delete_order(order_id: int):
+    df = load_data()
+    
+    if not (df["order_id"] == order_id).any():
+        raise HTTPException(status_code=404, detail=f"Order {order_id} not found")
+    
+    df = df[df["order_id"] != order_id]
+    save_data(df)
+    
+    return {"message": f"Order {order_id} deleted successfully"}
