@@ -820,3 +820,5 @@ order_id,order_datetime,customer_id,item_name,category,quantity,unit_price,total
 1498,2024-11-08 17:21:00,CUST0086,Paneer Tikka,Starter,1,180.0,180.0,Card,Takeaway
 1499,2024-05-03 09:33:00,CUST0022,Masala Dosa,Breakfast,1,120.0,120.0,Cash,Delivery
 1500,2026-05-08 11:22:07,CUST9999,Biryani,Main Course,2,320.0,640.0,UPI,Dine-in
+1501,2026-05-08 11:29:30,CUST9999,Biryani,Main Course,2,320.0,640.0,UPI,Dine-in
+1502,2026-05-17 12:51:26,CUST9999,Biryani,Main Course,2,320.0,640.0,UPI,Dine-in

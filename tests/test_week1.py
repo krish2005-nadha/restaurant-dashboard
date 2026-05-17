@@ -194,3 +194,66 @@ def test_delete_order():
 def test_delete_invalid_order():
     resp = client.delete("/orders/99999")
     assert resp.status_code == 404
+# ── Week 2 tests ──────────────────────
+
+def test_weekly_trend():
+    resp = client.get("/weekly-trend")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["weekly"]) == 7
+
+def test_weekly_correct_order():
+    weekly = client.get("/weekly-trend").json()["weekly"]
+    days = [w["weekday"] for w in weekly]
+    assert days[0] == "Monday"
+    assert days[-1] == "Sunday"
+
+def test_payment_methods():
+    resp = client.get("/payment-methods")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["payment_methods"]) > 0
+
+def test_payment_has_percentage():
+    methods = client.get("/payment-methods").json()["payment_methods"]
+    for m in methods:
+        assert "revenue_pct" in m
+        assert m["revenue_pct"] > 0
+
+def test_smart_insights():
+    resp = client.get("/smart-insights")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["insights"]) == 4
+
+def test_smart_insights_fields():
+    insights = client.get("/smart-insights").json()["insights"]
+    for insight in insights:
+        assert "title" in insight
+        assert "message" in insight
+        assert "type" in insight
+
+def test_export_orders_csv():
+    resp = client.get("/export/orders")
+    assert resp.status_code == 200
+    assert "text/csv" in resp.headers["content-type"]
+
+def test_export_summary_csv():
+    resp = client.get("/export/summary")
+    assert resp.status_code == 200
+    assert "text/csv" in resp.headers["content-type"]
+
+def test_order_type_filter():
+    resp = client.get("/orders?order_type=Dine-in")
+    assert resp.status_code == 200
+    orders = resp.json()["orders"]
+    for order in orders:
+        assert order["order_type"] == "Dine-in"
+
+def test_category_filter():
+    resp = client.get("/orders?category=Starter")
+    assert resp.status_code == 200
+    orders = resp.json()["orders"]
+    for order in orders:
+        assert order["category"] == "Starter"
+

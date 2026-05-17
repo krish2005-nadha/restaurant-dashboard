@@ -5,11 +5,13 @@ import pandas as pd
 import os
 from datetime import date, datetime
 from typing import Optional
+import io
+from fastapi.responses import StreamingResponse
 
 app = FastAPI(
     title="Restaurant Sales Dashboard API",
     description="Backend for PRJ-053",
-    version="1.0.0",
+    version="2.0.0",
 )
 
 app.add_middleware(
@@ -60,8 +62,10 @@ def health():
 
 @app.get("/kpi")
 def get_kpis(
-    start_date: Optional[date] = Query(None),
-    end_date:   Optional[date] = Query(None),
+    start_date:  Optional[date] = Query(None),
+    end_date:    Optional[date] = Query(None),
+    order_type:  Optional[str]  = Query(None),
+    category:    Optional[str]  = Query(None),
 ):
     df = load_data()
     
@@ -69,6 +73,10 @@ def get_kpis(
         df = df[df["date"] >= start_date]
     if end_date:
         df = df[df["date"] <= end_date]
+    if order_type:
+        df = df[df["order_type"] == order_type]
+    if category:
+        df = df[df["category"] == category]
     
     total_revenue    = float(df["total_price"].sum())
     order_level      = df.groupby("order_id")["total_price"].sum()
@@ -91,9 +99,11 @@ def get_kpis(
 
 @app.get("/bestsellers")
 def get_bestsellers(
-    start_date: Optional[date] = Query(None),
-    end_date:   Optional[date] = Query(None),
-    top_n: int = Query(5),
+    start_date:  Optional[date] = Query(None),
+    end_date:    Optional[date] = Query(None),
+    order_type:  Optional[str]  = Query(None),
+    category:    Optional[str]  = Query(None),
+    top_n:       int            = Query(5),
 ):
     df = load_data()
     
@@ -101,6 +111,10 @@ def get_bestsellers(
         df = df[df["date"] >= start_date]
     if end_date:
         df = df[df["date"] <= end_date]
+    if order_type:
+        df = df[df["order_type"] == order_type]
+    if category:
+        df = df[df["category"] == category]
     
     grouped = df.groupby(["item_name", "category"]).agg(
         total_revenue  = ("total_price", "sum"),
@@ -114,8 +128,9 @@ def get_bestsellers(
 
 @app.get("/peak-hours")
 def get_peak_hours(
-    start_date: Optional[date] = Query(None),
-    end_date:   Optional[date] = Query(None),
+    start_date:  Optional[date] = Query(None),
+    end_date:    Optional[date] = Query(None),
+    order_type:  Optional[str]  = Query(None),
 ):
     df = load_data()
     
@@ -123,6 +138,8 @@ def get_peak_hours(
         df = df[df["date"] >= start_date]
     if end_date:
         df = df[df["date"] <= end_date]
+    if order_type:
+        df = df[df["order_type"] == order_type]
     
     hourly = df.groupby("hour").agg(
         revenue = ("total_price", "sum"),
@@ -161,8 +178,9 @@ def get_repeat_customers(
 
 @app.get("/monthly-trend")
 def get_monthly_trend(
-    start_date: Optional[date] = Query(None),
-    end_date:   Optional[date] = Query(None),
+    start_date:  Optional[date] = Query(None),
+    end_date:    Optional[date] = Query(None),
+    order_type:  Optional[str]  = Query(None),
 ):
     df = load_data()
     
@@ -170,6 +188,8 @@ def get_monthly_trend(
         df = df[df["date"] >= start_date]
     if end_date:
         df = df[df["date"] <= end_date]
+    if order_type:
+        df = df[df["order_type"] == order_type]
     
     monthly = df.groupby("month").agg(
         revenue = ("total_price", "sum"),
@@ -180,8 +200,9 @@ def get_monthly_trend(
 
 @app.get("/category-breakdown")
 def get_category_breakdown(
-    start_date: Optional[date] = Query(None),
-    end_date:   Optional[date] = Query(None),
+    start_date:  Optional[date] = Query(None),
+    end_date:    Optional[date] = Query(None),
+    order_type:  Optional[str]  = Query(None),
 ):
     df = load_data()
     
@@ -189,6 +210,8 @@ def get_category_breakdown(
         df = df[df["date"] >= start_date]
     if end_date:
         df = df[df["date"] <= end_date]
+    if order_type:
+        df = df[df["order_type"] == order_type]
     
     cat = df.groupby("category").agg(
         revenue    = ("total_price", "sum"),
@@ -203,8 +226,10 @@ def get_category_breakdown(
 
 @app.get("/orders")
 def get_orders(
-    start_date: Optional[date] = Query(None),
-    end_date:   Optional[date] = Query(None),
+    start_date:  Optional[date] = Query(None),
+    end_date:    Optional[date] = Query(None),
+    order_type:  Optional[str]  = Query(None),
+    category:    Optional[str]  = Query(None),
 ):
     df = load_data()
     
@@ -212,6 +237,10 @@ def get_orders(
         df = df[df["date"] >= start_date]
     if end_date:
         df = df[df["date"] <= end_date]
+    if order_type:
+        df = df[df["order_type"] == order_type]
+    if category:
+        df = df[df["category"] == category]
     
     df_sorted = df.sort_values("order_datetime", ascending=False).head(50)
     
@@ -223,6 +252,168 @@ def get_orders(
             "unit_price", "total_price", "payment_method", "order_type",
         ]].to_dict(orient="records"),
     }
+
+@app.get("/weekly-trend")
+def get_weekly_trend(
+    start_date: Optional[date] = Query(None),
+    end_date:   Optional[date] = Query(None),
+):
+    df = load_data()
+    
+    if start_date:
+        df = df[df["date"] >= start_date]
+    if end_date:
+        df = df[df["date"] <= end_date]
+    
+    order_cols = ["Monday","Tuesday","Wednesday",
+                  "Thursday","Friday","Saturday","Sunday"]
+    
+    weekly = df.groupby("weekday").agg(
+        revenue = ("total_price", "sum"),
+        orders  = ("order_id",   "nunique"),
+    ).reset_index()
+    
+    weekly["weekday"] = pd.Categorical(
+        weekly["weekday"],
+        categories=order_cols,
+        ordered=True
+    )
+    weekly = weekly.sort_values("weekday")
+    
+    return {"weekly": weekly.to_dict(orient="records")}
+
+@app.get("/payment-methods")
+def get_payment_methods(
+    start_date: Optional[date] = Query(None),
+    end_date:   Optional[date] = Query(None),
+):
+    df = load_data()
+    
+    if start_date:
+        df = df[df["date"] >= start_date]
+    if end_date:
+        df = df[df["date"] <= end_date]
+    
+    payment = df.groupby("payment_method").agg(
+        revenue = ("total_price", "sum"),
+        orders  = ("order_id",   "nunique"),
+    ).reset_index()
+    
+    payment["revenue_pct"] = (
+        payment["revenue"] / payment["revenue"].sum() * 100
+    ).round(1)
+    
+    return {"payment_methods": payment.to_dict(orient="records")}
+
+@app.get("/smart-insights")
+def get_smart_insights(
+    start_date: Optional[date] = Query(None),
+    end_date:   Optional[date] = Query(None),
+):
+    df = load_data()
+    
+    if start_date:
+        df = df[df["date"] >= start_date]
+    if end_date:
+        df = df[df["date"] <= end_date]
+
+    # Slowest day
+    weekly = df.groupby("weekday")["total_price"].sum()
+    slowest_day = weekly.idxmin()
+    slowest_revenue = float(weekly.min())
+
+    # Best item
+    best_item = df.groupby("item_name")["total_price"].sum().idxmax()
+
+    # Best hour
+    best_hour = df.groupby("hour")["total_price"].sum().idxmax()
+
+    # Best payment method
+    best_payment = df.groupby("payment_method")["order_id"].nunique().idxmax()
+
+    return {
+        "insights": [
+            {
+                "type": "warning",
+                "title": f"Slow Day — {slowest_day}",
+                "message": f"{slowest_day} is your slowest day with only Rs.{slowest_revenue:,.0f} revenue. Consider running a special offer!",
+            },
+            {
+                "type": "success",
+                "title": f"Best Seller — {best_item}",
+                "message": f"{best_item} is your top selling item. Make sure it is always available!",
+            },
+            {
+                "type": "info",
+                "title": f"Peak Hour — {best_hour}:00",
+                "message": f"Most orders come in at {best_hour}:00. Make sure you have enough staff at this time!",
+            },
+            {
+                "type": "info",
+                "title": f"Popular Payment — {best_payment}",
+                "message": f"Most customers pay by {best_payment}. Make sure this payment option always works!",
+            },
+        ]
+    }
+
+@app.get("/export/orders")
+def export_orders(
+    start_date:  Optional[date] = Query(None),
+    end_date:    Optional[date] = Query(None),
+    order_type:  Optional[str]  = Query(None),
+    category:    Optional[str]  = Query(None),
+):
+    df = load_data()
+    
+    if start_date:
+        df = df[df["date"] >= start_date]
+    if end_date:
+        df = df[df["date"] <= end_date]
+    if order_type:
+        df = df[df["order_type"] == order_type]
+    if category:
+        df = df[df["category"] == category]
+    
+    df = df.drop(columns=["date", "hour", "month", "weekday"], errors="ignore")
+    
+    stream = io.StringIO()
+    df.to_csv(stream, index=False)
+    stream.seek(0)
+    
+    filename = f"orders_{start_date or 'all'}_{end_date or 'all'}.csv"
+    return StreamingResponse(
+        iter([stream.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+@app.get("/export/summary")
+def export_summary(
+    start_date: Optional[date] = Query(None),
+    end_date:   Optional[date] = Query(None),
+):
+    df = load_data()
+    
+    if start_date:
+        df = df[df["date"] >= start_date]
+    if end_date:
+        df = df[df["date"] <= end_date]
+    
+    summary = df.groupby(["item_name", "category"]).agg(
+        total_revenue  = ("total_price", "sum"),
+        total_quantity = ("quantity",   "sum"),
+        total_orders   = ("order_id",  "nunique"),
+    ).reset_index().sort_values("total_revenue", ascending=False)
+    
+    stream = io.StringIO()
+    summary.to_csv(stream, index=False)
+    stream.seek(0)
+    
+    return StreamingResponse(
+        iter([stream.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=sales_summary.csv"},
+    )
 
 # ── CRUD Operations ───────────────────────────────────────────────────────────
 
@@ -278,7 +469,7 @@ def update_order(order_id: int, order: OrderCreate):
     df.loc[df["order_id"] == order_id, "customer_id"]    = order.customer_id
     df.loc[df["order_id"] == order_id, "item_name"]      = order.item_name
     df.loc[df["order_id"] == order_id, "category"]       = order.category
-    df.loc[df["order_id"] == order_id, "quantity"]        = order.quantity
+    df.loc[df["order_id"] == order_id, "quantity"]       = order.quantity
     df.loc[df["order_id"] == order_id, "unit_price"]     = order.unit_price
     df.loc[df["order_id"] == order_id, "total_price"]    = order.unit_price * order.quantity
     df.loc[df["order_id"] == order_id, "payment_method"] = order.payment_method
